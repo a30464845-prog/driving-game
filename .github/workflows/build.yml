@@ -1,4 +1,4 @@
-name: Build Driving Game
+name: Build GTA Game (APK + EXE)
 
 on:
   workflow_dispatch:
@@ -6,17 +6,22 @@ on:
     branches: [main]
 
 jobs:
+  # ==================== ANDROID APK ====================
   build-android:
     runs-on: ubuntu-latest
     steps:
-      # Step 1: Ready-made driving game clone karo
-      - name: Clone driving game
+      - name: Clone game source
         uses: actions/checkout@v4
         with:
-          repository: evolodenok-alt/drive-real-3d
+          repository: Faizankhan17623/OpenCity
           ref: main
+          path: game
 
-      # Step 2: Godot se Android APK build karo
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
@@ -28,44 +33,62 @@ jobs:
         with:
           packages: 'platform-tools platforms;android-34 build-tools;34.0.0'
 
-      - name: Build APK
+      - name: Setup Capacitor
         run: |
-          cd android
-          ./gradlew assembleDebug
+          cd game
+          npm init -y
+          npm install @capacitor/core @capacitor/cli @capacitor/android
+          cat > capacitor.config.json << 'EOF'
+          {
+            "appId": "com.gta.driving",
+            "appName": "GTA Driving",
+            "webDir": "."
+          }
+          EOF
+          npx cap add android
+          npx cap sync android
+
+      - name: Build APK
+        working-directory: game/android
+        run: ./gradlew assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: DrivingGame-Android-APK
-          path: android/app/build/outputs/apk/debug/*.apk
+          name: GTA-Driving-Android-APK
+          path: game/android/app/build/outputs/apk/debug/app-debug.apk
 
+  # ==================== WINDOWS EXE ====================
   build-pc:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
-      # Step 1: Same game clone karo
-      - name: Clone driving game
+      - name: Clone game source
         uses: actions/checkout@v4
         with:
-          repository: evolodenok-alt/drive-real-3d
+          repository: Faizankhan17623/OpenCity
           ref: main
+          path: game
 
-      # Step 2: Web build (browser me chalega - PC ke liye)
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: '20'
 
-      - name: Build web version
+      - name: Create Electron wrapper
         run: |
-          npm init -y
-          npm install three
-          # Godot export for web ya simple web wrapper
-          mkdir -p dist
-          echo '<iframe src="https://cdn.jsdelivr.net/gh/evolodenok-alt/drive-real-3d@main/web/index.html" style="width:100%;height:100%;border:none">' > dist/index.html
-          echo '</iframe>' >> dist/index.html
+          mkdir app
+          cd app
+          copy ..\game\* . /S
+          echo {"name":"gta-driving","version":"1.0.0","main":"main.js","build":{"appId":"com.gta.driving","productName":"GTA Driving","win":{"target":"portable"}}} > package.json
+          echo "const {app,BrowserWindow}=require('electron');function c(){let w=new BrowserWindow({width:1280,height:720,fullscreen:true,webPreferences:{nodeIntegration:false}});w.loadFile('index.html');w.setMenuBarVisibility(false)}app.whenReady().then(c)" > main.js
+          npm install electron electron-builder --save-dev
 
-      - name: Upload PC build
+      - name: Build EXE
+        working-directory: app
+        run: npx electron-builder --win portable --publish never
+
+      - name: Upload EXE
         uses: actions/upload-artifact@v4
         with:
-          name: DrivingGame-PC-Web
-          path: dist/   
+          name: GTA-Driving-Windows-EXE
+          path: app/dist/*portable*.exe   
