@@ -8,7 +8,6 @@ on:
 
 env:
   GODOT_VERSION: "4.7.2-stable"
-  GODOT_TEMPLATES_DIR: ~/.local/share/godot/export_templates/4.7.2
 
 jobs:
   # ═══════════════════════════════════════════
@@ -19,16 +18,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download Godot
-        run: |
-          wget -q "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}/Godot_v${GODOT_VERSION}_linux.x86_64" -O godot
-          chmod +x godot
-
-      - name: Install Export Templates
-        run: |
-          wget -q "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}/Godot_v${GODOT_VERSION}_export_templates.tpz" -O templates.tpz
-          mkdir -p ~/.local/share/godot/export_templates/4.7.2
-          unzip -q templates.tpz -d ~/.local/share/godot/export_templates/4.7.2/
+      - name: Setup Godot
+        uses: chickensoft-games/setup-godot@v2
+        with:
+          godot-version: ${{ env.GODOT_VERSION }}
+          use-dotnet: false
 
       - name: Create Project
         run: |
@@ -561,13 +555,13 @@ jobs:
       - name: Import Project
         run: |
           cd project
-          ../godot --headless --import 2>&1 || true
+          godot --headless --import 2>&1 || true
 
       - name: Export Windows 32-bit
         run: |
           cd project
           mkdir -p ../output
-          ../godot --headless --export-release "Windows" ../output/game.exe
+          godot --headless --export-release "Windows" ../output/game.exe
           ls -la ../output/game.exe
 
       - name: Upload Windows EXE
@@ -577,7 +571,7 @@ jobs:
           path: output/game.exe
 
   # ═══════════════════════════════════════════
-  # JOB 2: Android APK (NO setup-android action)
+  # JOB 2: Android APK
   # ═══════════════════════════════════════════
   build-android:
     runs-on: ubuntu-latest
@@ -590,25 +584,18 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Show Android SDK info
+      - name: Setup Godot
+        uses: chickensoft-games/setup-godot@v2
+        with:
+          godot-version: ${{ env.GODOT_VERSION }}
+          use-dotnet: false
+
+      - name: Install Android SDK packages
         run: |
           echo "ANDROID_HOME=$ANDROID_HOME"
-          echo "SDK path: /usr/local/lib/android/sdk"
-          ls /usr/local/lib/android/sdk/
-          # Install only what Godot needs (NO 'tools' package!)
+          ls /usr/local/lib/android/sdk/ 2>/dev/null || ls $ANDROID_HOME/ 2>/dev/null
           yes | /usr/local/lib/android/sdk/cmdline-tools/*/bin/sdkmanager --licenses 2>/dev/null || true
           /usr/local/lib/android/sdk/cmdline-tools/*/bin/sdkmanager "platform-tools" "build-tools;34.0.0" "platforms;android-34" 2>&1 || true
-
-      - name: Download Godot
-        run: |
-          wget -q "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}/Godot_v${GODOT_VERSION}_linux.x86_64" -O godot
-          chmod +x godot
-
-      - name: Install Export Templates
-        run: |
-          wget -q "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}/Godot_v${GODOT_VERSION}_export_templates.tpz" -O templates.tpz
-          mkdir -p ~/.local/share/godot/export_templates/4.7.2
-          unzip -q templates.tpz -d ~/.local/share/godot/export_templates/4.7.2/
 
       - name: Create Keystore
         run: |
@@ -1167,12 +1154,12 @@ jobs:
       - name: Import Project
         run: |
           cd project
-          ../godot --headless --import 2>&1 || true
+          godot --headless --import 2>&1 || true
 
       - name: Install Android Build Template
         run: |
           cd project
-          ../godot --headless --install-android-build-template 2>&1 || true
+          godot --headless --install-android-build-template 2>&1 || true
 
       - name: Export Android APK
         env:
@@ -1182,7 +1169,7 @@ jobs:
         run: |
           cd project
           mkdir -p ../output
-          ../godot --headless --export-release "Android" ../output/game.apk
+          godot --headless --export-release "Android" ../output/game.apk
           ls -la ../output/game.apk
 
       - name: Upload Android APK
