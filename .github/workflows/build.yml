@@ -1,12 +1,3 @@
-name: Build GTA Game (APK + EXE)
-
-on:
-  workflow_dispatch:
-  push:
-    branches: [main]
-
-jobs:
-  # ==================== ANDROID APK ====================
   build-android:
     runs-on: ubuntu-latest
     steps:
@@ -36,15 +27,25 @@ jobs:
       - name: Setup Capacitor
         run: |
           cd game
-          npm init -y
           npm install @capacitor/core @capacitor/cli @capacitor/android
+
+          # www folder banao — Capacitor ka webDir subdirectory hona chahiye
+          mkdir -p www
+          # Game ke saare files copy karo
+          find . -maxdepth 1 -type f \( -name "*.html" -o -name "*.js" -o -name "*.css" -o -name "*.json" -o -name "*.png" -o -name "*.svg" -o -name "*.mp3" -o -name "*.ogg" -o -name "*.wasm" \) -exec cp {} www/ \;
+          # Subfolders copy karo
+          for dir in assets models textures scripts audio data; do
+            [ -d "$dir" ] && cp -r "$dir" www/
+          done
+
           cat > capacitor.config.json << 'EOF'
           {
             "appId": "com.gta.driving",
             "appName": "GTA Driving",
-            "webDir": "."
+            "webDir": "www"
           }
           EOF
+
           npx cap add android
           npx cap sync android
 
@@ -56,39 +57,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: GTA-Driving-Android-APK
-          path: game/android/app/build/outputs/apk/debug/app-debug.apk
-
-  # ==================== WINDOWS EXE ====================
-  build-pc:
-    runs-on: windows-latest
-    steps:
-      - name: Clone game source
-        uses: actions/checkout@v4
-        with:
-          repository: Faizankhan17623/OpenCity
-          ref: main
-          path: game
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Create Electron wrapper
-        run: |
-          mkdir app
-          cd app
-          copy ..\game\* . /S
-          echo {"name":"gta-driving","version":"1.0.0","main":"main.js","build":{"appId":"com.gta.driving","productName":"GTA Driving","win":{"target":"portable"}}} > package.json
-          echo "const {app,BrowserWindow}=require('electron');function c(){let w=new BrowserWindow({width:1280,height:720,fullscreen:true,webPreferences:{nodeIntegration:false}});w.loadFile('index.html');w.setMenuBarVisibility(false)}app.whenReady().then(c)" > main.js
-          npm install electron electron-builder --save-dev
-
-      - name: Build EXE
-        working-directory: app
-        run: npx electron-builder --win portable --publish never
-
-      - name: Upload EXE
-        uses: actions/upload-artifact@v4
-        with:
-          name: GTA-Driving-Windows-EXE
-          path: app/dist/*portable*.exe   
+          path: game/android/app/build/outputs/apk/debug/app-debug.apk   
