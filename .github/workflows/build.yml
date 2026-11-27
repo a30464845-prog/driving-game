@@ -82,4 +82,1022 @@ jobs:
           renderer/rendering_method="gl_compatibility"
           renderer/rendering_method.mobile="gl_compatibility"
           anti_aliasing/quality/msaa_3d=0
-          environment/defaults/default_clear_color=Col   
+          environment/defaults/default_clear_color=Color(0.1, 0.1, 0.15, 1)
+          textures/vram_compression/import_etc2_astc=true
+          EOF
+
+      - name: Write export_presets.cfg
+        run: |
+          cat > project/export_presets.cfg << 'EOF'
+          [preset.0]
+          name="Windows"
+          platform="Windows Desktop"
+          runnable=true
+          export_filter="all_resources"
+          include_filter=""
+          exclude_filter=""
+          export_path="output/game.exe"
+          patch_path=""
+          patch_include_filter=""
+          patch_exclude_filter=""
+          patch_format=0
+          embed_pck=true
+          texture_compression/2d_lossy_quality=0.7
+          binary_format/architecture="x86"
+          binary_format/embed_pck=true
+          ssh_remote_deploy/enabled=false
+
+          [preset.0.options]
+          custom_template/debug=""
+          custom_template/release=""
+          debug/export_console_wrapper=1
+          binary_format/embed_pck=true
+          texture_format/s3tc_bptc=true
+          texture_format/etc2_astc=false
+          EOF
+
+      - name: Write icon.svg
+        run: |
+          cat > project/icon.svg << 'EOF'
+          <svg xmlns="http://www.w3.org/2000/svg" width="128" height="128"><rect width="128" height="128" fill="#2a2a3a"/><circle cx="64" cy="64" r="40" fill="#e74c3c"/><rect x="58" y="30" width="12" height="50" fill="#2c3e50"/><rect x="44" y="50" width="40" height="12" fill="#2c3e50"/></svg>
+          EOF
+
+      - name: Write main.tscn
+        run: |
+          cat > project/main.tscn << 'EOF'
+          [gd_scene load_steps=2 format=3]
+
+          [ext_resource type="Script" path="res://main.gd" id="1"]
+
+          [node name="Main" type="Node3D"]
+          script = ExtResource("1")
+          EOF
+
+      - name: Write main.gd
+        run: |
+          cat > project/main.gd << 'EOF'
+          extends Node3D
+
+          var player_health: int = 100
+          var score: int = 0
+          var game_over: bool = false
+          var player: CharacterBody3D
+          var camera: Camera3D
+          var enemies: Array[Node3D] = []
+          var world: Node3D
+          var hud: CanvasLayer
+          var health_label: Label
+          var score_label: Label
+          var game_over_label: Label
+          var crosshair: Label
+          var shoot_cooldown: float = 0.0
+          var SHOOT_COOLDOWN_MAX: float = 0.25
+          var ENEMY_SPEED: float = 3.0
+          var ENEMY_DAMAGE: float = 10
+          var PLAYER_SPEED: float = 5.0
+          var MAX_ENEMIES: int = 6
+          var enemy_spawn_timer: float = 0.0
+          var enemy_spawn_interval: float = 3.0
+
+          func _ready() -> void:
+              randomize()
+              _build_environment()
+              _build_player()
+              _build_hud()
+              _spawn_enemies(3)
+              if OS.get_name() != "Android" and OS.get_name() != "iOS":
+                  Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+          func _build_environment() -> void:
+              world = Node3D.new()
+              world.name = "World"
+              add_child(world)
+
+              var sun = DirectionalLight3D.new()
+              sun.rotation_degrees = Vector3(-45, -30, 0)
+              sun.light_energy = 1.0
+              sun.shadow_enabled = true
+              world.add_child(sun)
+
+              var ambient = AmbientLight3D.new()
+              ambient.light_energy = 0.4
+              world.add_child(ambient)
+
+              var floor = MeshInstance3D.new()
+              var floor_mesh = BoxMesh.new()
+              floor_mesh.size = Vector3(100, 0.5, 100)
+              var floor_mat = StandardMaterial3D.new()
+              floor_mat.albedo_color = Color(0.3, 0.35, 0.3)
+              floor_mesh.material = floor_mat
+              floor.mesh = floor_mesh
+              floor.position = Vector3(0, -0.25, 0)
+              world.add_child(floor)
+
+              var floor_col = StaticBody3D.new()
+              var floor_shape = CollisionShape3D.new()
+              var floor_box = BoxShape3D.new()
+              floor_box.size = Vector3(100, 0.5, 100)
+              floor_shape.shape = floor_box
+              floor_col.add_child(floor_shape)
+              floor_col.position = Vector3(0, -0.25, 0)
+              world.add_child(floor_col)
+
+              for i in range(4):
+                  var wall = MeshInstance3D.new()
+                  var wall_mesh = BoxMesh.new()
+                  var wall_mat = StandardMaterial3D.new()
+                  wall_mat.albedo_color = Color(0.4, 0.35, 0.3)
+                  wall_mesh.material = wall_mat
+                  match i:
+                      0:
+                          wall_mesh.size = Vector3(100, 5, 1)
+                          wall.position = Vector3(0, 2.5, -50)
+                      1:
+                          wall_mesh.size = Vector3(100, 5, 1)
+                          wall.position = Vector3(0, 2.5, 50)
+                      2:
+                          wall_mesh.size = Vector3(1, 5, 100)
+                          wall.position = Vector3(-50, 2.5, 0)
+                      3:
+                          wall_mesh.size = Vector3(1, 5, 100)
+                          wall.position = Vector3(50, 2.5, 0)
+                  wall.mesh = wall_mesh
+                  world.add_child(wall)
+
+                  var wall_col = StaticBody3D.new()
+                  var wall_shape = CollisionShape3D.new()
+                  var wall_box = BoxShape3D.new()
+                  wall_box.size = wall_mesh.size
+                  wall_shape.shape = wall_box
+                  wall_col.add_child(wall_shape)
+                  wall_col.position = wall.position
+                  world.add_child(wall_col)
+
+              var crate_positions = [
+                  Vector3(10, 0.75, 10), Vector3(-15, 0.75, 5),
+                  Vector3(20, 0.75, -20), Vector3(-10, 0.75, -30),
+                  Vector3(30, 0.75, 15), Vector3(-25, 0.75, -10),
+                  Vector3(5, 0.75, 25), Vector3(-30, 0.75, 30),
+              ]
+              for pos in crate_positions:
+                  var crate = MeshInstance3D.new()
+                  var crate_mesh = BoxMesh.new()
+                  crate_mesh.size = Vector3(1.5, 1.5, 1.5)
+                  var crate_mat = StandardMaterial3D.new()
+                  crate_mat.albedo_color = Color(0.6, 0.45, 0.2)
+                  crate_mesh.material = crate_mat
+                  crate.mesh = crate_mesh
+                  crate.position = pos
+                  world.add_child(crate)
+
+                  var crate_col = StaticBody3D.new()
+                  var crate_shape = CollisionShape3D.new()
+                  var crate_box = BoxShape3D.new()
+                  crate_box.size = Vector3(1.5, 1.5, 1.5)
+                  crate_shape.shape = crate_box
+                  crate_col.add_child(crate_shape)
+                  crate_col.position = pos
+                  world.add_child(crate_col)
+
+          func _build_player() -> void:
+              player = CharacterBody3D.new()
+              player.name = "Player"
+              player.position = Vector3(0, 1.7, 0)
+
+              var col = CollisionShape3D.new()
+              var capsule = CapsuleShape3D.new()
+              capsule.radius = 0.4
+              capsule.height = 1.8
+              col.shape = capsule
+              player.add_child(col)
+
+              camera = Camera3D.new()
+              camera.name = "Camera"
+              camera.fov = 75.0
+              camera.near = 0.1
+              camera.far = 200.0
+              player.add_child(camera)
+
+              var gun = MeshInstance3D.new()
+              var gun_mesh = BoxMesh.new()
+              gun_mesh.size = Vector3(0.08, 0.08, 0.4)
+              var gun_mat = StandardMaterial3D.new()
+              gun_mat.albedo_color = Color(0.2, 0.2, 0.25)
+              gun_mesh.material = gun_mat
+              gun.mesh = gun_mesh
+              gun.position = Vector3(0.2, -0.15, -0.4)
+              camera.add_child(gun)
+
+              add_child(player)
+
+          func _build_hud() -> void:
+              hud = CanvasLayer.new()
+              hud.name = "HUD"
+              add_child(hud)
+
+              crosshair = Label.new()
+              crosshair.text = "+"
+              crosshair.add_theme_font_size_override("font_size", 24)
+              crosshair.add_theme_color_override("font_color", Color(1, 1, 1, 0.8))
+              crosshair.position = Vector2(640 - 8, 360 - 12)
+              crosshair.z_index = 10
+              hud.add_child(crosshair)
+
+              health_label = Label.new()
+              health_label.text = "HP: 100"
+              health_label.add_theme_font_size_override("font_size", 28)
+              health_label.add_theme_color_override("font_color", Color(0.3, 1.0, 0.3))
+              health_label.position = Vector2(20, 20)
+              hud.add_child(health_label)
+
+              score_label = Label.new()
+              score_label.text = "Score: 0"
+              score_label.add_theme_font_size_override("font_size", 28)
+              score_label.add_theme_color_override("font_color", Color(1.0, 0.9, 0.3))
+              score_label.position = Vector2(20, 55)
+              hud.add_child(score_label)
+
+              game_over_label = Label.new()
+              game_over_label.text = ""
+              game_over_label.add_theme_font_size_override("font_size", 48)
+              game_over_label.add_theme_color_override("font_color", Color(1, 0.2, 0.2))
+              game_over_label.position = Vector2(350, 300)
+              game_over_label.visible = false
+              hud.add_child(game_over_label)
+
+          func _spawn_enemies(count: int) -> void:
+              for i in range(count):
+                  _spawn_one_enemy()
+
+          func _spawn_one_enemy() -> void:
+              var enemy = CharacterBody3D.new()
+              enemy.name = "Enemy_" + str(enemies.size())
+
+              var body = MeshInstance3D.new()
+              var body_mesh = BoxMesh.new()
+              body_mesh.size = Vector3(0.8, 1.6, 0.8)
+              var body_mat = StandardMaterial3D.new()
+              body_mat.albedo_color = Color(0.8, 0.2, 0.2)
+              body_mesh.material = body_mat
+              body.mesh = body_mesh
+              body.position = Vector3(0, 0.8, 0)
+              enemy.add_child(body)
+
+              var head = MeshInstance3D.new()
+              var head_mesh = BoxMesh.new()
+              head_mesh.size = Vector3(0.5, 0.5, 0.5)
+              var head_mat = StandardMaterial3D.new()
+              head_mat.albedo_color = Color(0.9, 0.5, 0.3)
+              head_mesh.material = head_mat
+              head.mesh = head_mesh
+              head.position = Vector3(0, 1.85, 0)
+              enemy.add_child(head)
+
+              var col = CollisionShape3D.new()
+              var box = BoxShape3D.new()
+              box.size = Vector3(0.8, 1.6, 0.8)
+              col.shape = box
+              col.position = Vector3(0, 0.8, 0)
+              enemy.add_child(col)
+
+              var pos = Vector3(randf_range(-40, 40), 0.0, randf_range(-40, 40))
+              while pos.distance_to(player.position) < 15.0:
+                  pos = Vector3(randf_range(-40, 40), 0.0, randf_range(-40, 40))
+              enemy.position = pos
+
+              enemy.set_meta("health", 3)
+              add_child(enemy)
+              enemies.append(enemy)
+
+          func _process(delta: float) -> void:
+              if game_over:
+                  if Input.is_action_just_pressed("restart"):
+                      get_tree().reload_current_scene()
+                  return
+
+              if shoot_cooldown > 0:
+                  shoot_cooldown -= delta
+
+              if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+                  var mouse_motion = Input.get_mouse_motion()
+                  player.rotate_y(-mouse_motion.x * 0.002)
+                  camera.rotate_x(-mouse_motion.y * 0.002)
+                  camera.rotation.x = clampf(camera.rotation.x, -PI/2 + 0.1, PI/2 - 0.1)
+
+              var input_dir = Vector3.ZERO
+              if Input.is_action_pressed("move_forward"):
+                  input_dir.z -= 1
+              if Input.is_action_pressed("move_back"):
+                  input_dir.z += 1
+              if Input.is_action_pressed("move_left"):
+                  input_dir.x -= 1
+              if Input.is_action_pressed("move_right"):
+                  input_dir.x += 1
+
+              if input_dir.length() > 0:
+                  input_dir = input_dir.normalized()
+                  var world_dir = player.transform.basis * input_dir
+                  world_dir.y = 0
+                  player.velocity = world_dir * PLAYER_SPEED
+              else:
+                  player.velocity = Vector3.ZERO
+              player.velocity.y = -9.8 * delta * 60
+              player.move_and_slide()
+
+              player.position.x = clampf(player.position.x, -48, 48)
+              player.position.z = clampf(player.position.z, -48, 48)
+              if player.position.y < 1.7:
+                  player.position.y = 1.7
+                  player.velocity.y = 0
+
+              if Input.is_action_just_pressed("shoot") and shoot_cooldown <= 0:
+                  _shoot()
+
+              _update_enemies(delta)
+
+              enemy_spawn_timer += delta
+              if enemy_spawn_timer >= enemy_spawn_interval and enemies.size() < MAX_ENEMIES:
+                  _spawn_one_enemy()
+                  enemy_spawn_timer = 0.0
+
+          func _shoot() -> void:
+              shoot_cooldown = SHOOT_COOLDOWN_MAX
+
+              var space = get_world_3d().direct_space_state
+              var from = camera.global_position
+              var to = from + camera.global_transform.basis.z * -50
+              var query = PhysicsRayQueryParameters3D.create(from, to)
+              query.exclude = [player]
+              var result = space.intersect_ray(query)
+
+              if result:
+                  var collider = result.collider
+                  if collider is CharacterBody3D and collider in enemies:
+                      var hp = collider.get_meta("health") - 1
+                      if hp <= 0:
+                          _kill_enemy(collider)
+                      else:
+                          collider.set_meta("health", hp)
+
+              var flash = MeshInstance3D.new()
+              var flash_mesh = SphereMesh.new()
+              flash_mesh.radius = 0.05
+              flash_mesh.height = 0.1
+              var flash_mat = StandardMaterial3D.new()
+              flash_mat.albedo_color = Color(1, 0.8, 0.2)
+              flash_mat.emission = Color(1, 0.8, 0.2)
+              flash_mat.emission_energy_multiplier = 3.0
+              flash_mesh.material = flash_mat
+              flash.mesh = flash_mesh
+              flash.position = Vector3(0.2, -0.15, -0.6)
+              camera.add_child(flash)
+              get_tree().create_timer(0.05).timeout.connect(flash.queue_free.bind())
+
+          func _kill_enemy(enemy: Node3D) -> void:
+              enemies.erase(enemy)
+              enemy.queue_free()
+              score += 10
+              score_label.text = "Score: " + str(score)
+
+          func _update_enemies(delta: float) -> void:
+              for enemy in enemies:
+                  if not is_instance_valid(enemy):
+                      continue
+                  var dir = (player.position - enemy.position)
+                  dir.y = 0
+                  if dir.length() > 1.5:
+                      dir = dir.normalized()
+                      enemy.position += dir * ENEMY_SPEED * delta
+                      enemy.look_at(enemy.position + dir, Vector3.UP)
+
+                  if enemy.position.distance_to(player.position) < 1.2:
+                      player_health -= ENEMY_DAMAGE * delta
+                      health_label.text = "HP: " + str(int(player_health))
+                      health_label.add_theme_color_override("font_color", Color(1, 0.3, 0.3))
+                      if player_health <= 0:
+                          _game_over()
+                          return
+
+          func _game_over() -> void:
+              game_over = true
+              game_over_label.text = "GAME OVER - Score: " + str(score) + "\nPress R to Restart"
+              game_over_label.visible = true
+              Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+          func _input(event: InputEvent) -> void:
+              if game_over:
+                  if event is InputEventScreenTouch and event.pressed:
+                      get_tree().reload_current_scene()
+                  return
+
+              if OS.get_name() == "Android" or OS.get_name() == "iOS":
+                  if event is InputEventScreenTouch:
+                      if event.pressed:
+                          if event.position.x > DisplayServer.window_size.x / 2:
+                              if shoot_cooldown <= 0:
+                                  _shoot()
+                  elif event is InputEventScreenDrag:
+                      if event.position.x < DisplayServer.window_size.x / 2:
+                          var move_vec = Vector2(event.relative.x, event.relative.y) * 0.05
+                          var world_dir = player.transform.basis * Vector3(move_vec.x, 0, move_vec.y)
+                          player.velocity = world_dir.normalized() * PLAYER_SPEED
+                      else:
+                          player.rotate_y(-event.relative.x * 0.003)
+                          camera.rotate_x(-event.relative.y * 0.003)
+                          camera.rotation.x = clampf(camera.rotation.x, -PI/2 + 0.1, PI/2 - 0.1)
+          EOF
+
+      - name: Import Project
+        run: |
+          cd project
+          godot --headless --import 2>&1 || true
+
+      - name: Export Windows 32-bit
+        run: |
+          cd project
+          mkdir -p ../output
+          godot --headless --export-release "Windows" ../output/game.exe
+          ls -la ../output/game.exe
+
+      - name: Upload Windows EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: mini-fps-windows-32bit
+          path: output/game.exe
+
+  # ═══════════════════════════════════════════
+  # JOB 2: Android APK
+  # ═══════════════════════════════════════════
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Godot
+        uses: chickensoft-games/setup-godot@v2
+        with:
+          version: ${{ env.GODOT_VERSION }}
+          use-dotnet: false
+          include-templates: true
+
+      - name: Install Android SDK packages
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "JAVA_HOME=$JAVA_HOME"
+          ls /usr/local/lib/android/sdk/ 2>/dev/null || echo "SDK not at default path"
+          yes | /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --licenses 2>/dev/null || true
+          /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager "platform-tools" "build-tools;34.0.0" "platforms;android-34" 2>&1 || true
+
+      - name: Create Keystore
+        run: |
+          keytool -genkeypair -v \
+            -keystore debug.keystore \
+            -storepass android \
+            -alias androiddebugkey \
+            -keypass android \
+            -keyalg RSA -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=Debug, OU=Debug, O=Debug, L=Debug, ST=Debug, C=US"
+          ls -la debug.keystore
+
+      - name: Configure Godot Editor Settings
+        run: |
+          mkdir -p ~/.config/godot
+          cat > ~/.config/godot/editor_settings-4.tres << 'EOF'
+          [gd_resource type="EditorSettings" format=3]
+
+          [resource]
+          export/android/android_sdk_path = "/usr/local/lib/android/sdk"
+          export/android/shutdown_adb_on_exit = true
+          export/android/force_system_user = false
+          EOF
+
+      - name: Create Project
+        run: |
+          mkdir -p project
+
+      - name: Write project.godot
+        run: |
+          cat > project/project.godot << 'EOF'
+          config_version=5
+
+          [application]
+          config/name="Mini FPS"
+          run/main_scene="res://main.tscn"
+          config/features=PackedStringArray("4.7", "Compatibility")
+          config/icon="res://icon.svg"
+
+          [display]
+          window/size/viewport_width=1280
+          window/size/viewport_height=720
+          window/stretch/mode="canvas_items"
+          window/stretch/aspect="keep"
+
+          [input]
+          move_forward={
+          "deadzone": 0.5,
+          "events": [Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":87,"key_label":0,"unicode":0,"location":0,"echo":false,"script":null)
+          ]
+          }
+          move_back={
+          "deadzone": 0.5,
+          "events": [Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":83,"key_label":0,"unicode":0,"location":0,"echo":false,"script":null)
+          ]
+          }
+          move_left={
+          "deadzone": 0.5,
+          "events": [Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":65,"key_label":0,"unicode":0,"location":0,"echo":false,"script":null)
+          ]
+          }
+          move_right={
+          "deadzone": 0.5,
+          "events": [Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":68,"key_label":0,"unicode":0,"location":0,"echo":false,"script":null)
+          ]
+          }
+          shoot={
+          "deadzone": 0.5,
+          "events": [Object(InputEventMouseButton,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"button_mask":1,"position":Vector2(0,0),"global_position":Vector2(0,0),"factor":1.0,"button_index":1,"canceled":false,"pressed":true,"double_click":false,"script":null)
+          ]
+          }
+          restart={
+          "deadzone": 0.5,
+          "events": [Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":82,"key_label":0,"unicode":0,"location":0,"echo":false,"script":null)
+          ]
+          }
+
+          [rendering]
+          renderer/rendering_method="gl_compatibility"
+          renderer/rendering_method.mobile="gl_compatibility"
+          anti_aliasing/quality/msaa_3d=0
+          environment/defaults/default_clear_color=Color(0.1, 0.1, 0.15, 1)
+          textures/vram_compression/import_etc2_astc=true
+          EOF
+
+      - name: Write export_presets.cfg
+        run: |
+          cat > project/export_presets.cfg << 'EOF'
+          [preset.0]
+          name="Android"
+          platform="Android"
+          runnable=true
+          export_filter="all_resources"
+          include_filter=""
+          exclude_filter=""
+          export_path="output/game.apk"
+          patch_path=""
+          patch_include_filter=""
+          patch_exclude_filter=""
+          patch_format=0
+          embed_pck=true
+          texture_compression/2d_lossy_quality=0.7
+          binary_format/architecture="armeabi-v7a,arm64-v8a"
+          binary_format/embed_pck=true
+          ssh_remote_deploy/enabled=false
+
+          [preset.0.options]
+          custom_template/debug=""
+          custom_template/release=""
+          architecture/armeabi-v7a=true
+          architecture/arm64-v8a=true
+          architecture/x86=false
+          architecture/x86_64=false
+          keystore/debug=""
+          keystore/debug_user=""
+          keystore/debug_password=""
+          keystore/release=""
+          keystore/release_user=""
+          keystore/release_password=""
+          version/code=1
+          version/name="1.0"
+          package/unique_name="com.minifps.game"
+          screen/immersive_mode=true
+          screen/support_small=true
+          screen/support_normal=true
+          screen/support_large=true
+          screen/support_xlarge=true
+          graphics/opengl_debug=false
+          graphics/vulkan_layer_path=""
+          graphics/clamp_texture_size=false
+          graphics/force_32_bit_framebuffer=false
+          texture_format/s3tc_bptc=false
+          texture_format/etc2_astc=true
+          EOF
+
+      - name: Write icon.svg
+        run: |
+          cat > project/icon.svg << 'EOF'
+          <svg xmlns="http://www.w3.org/2000/svg" width="128" height="128"><rect width="128" height="128" fill="#2a2a3a"/><circle cx="64" cy="64" r="40" fill="#e74c3c"/><rect x="58" y="30" width="12" height="50" fill="#2c3e50"/><rect x="44" y="50" width="40" height="12" fill="#2c3e50"/></svg>
+          EOF
+
+      - name: Write main.tscn
+        run: |
+          cat > project/main.tscn << 'EOF'
+          [gd_scene load_steps=2 format=3]
+
+          [ext_resource type="Script" path="res://main.gd" id="1"]
+
+          [node name="Main" type="Node3D"]
+          script = ExtResource("1")
+          EOF
+
+      - name: Write main.gd
+        run: |
+          cat > project/main.gd << 'EOF'
+          extends Node3D
+
+          var player_health: int = 100
+          var score: int = 0
+          var game_over: bool = false
+          var player: CharacterBody3D
+          var camera: Camera3D
+          var enemies: Array[Node3D] = []
+          var world: Node3D
+          var hud: CanvasLayer
+          var health_label: Label
+          var score_label: Label
+          var game_over_label: Label
+          var crosshair: Label
+          var shoot_cooldown: float = 0.0
+          var SHOOT_COOLDOWN_MAX: float = 0.25
+          var ENEMY_SPEED: float = 3.0
+          var ENEMY_DAMAGE: float = 10
+          var PLAYER_SPEED: float = 5.0
+          var MAX_ENEMIES: int = 6
+          var enemy_spawn_timer: float = 0.0
+          var enemy_spawn_interval: float = 3.0
+
+          func _ready() -> void:
+              randomize()
+              _build_environment()
+              _build_player()
+              _build_hud()
+              _spawn_enemies(3)
+              if OS.get_name() != "Android" and OS.get_name() != "iOS":
+                  Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+          func _build_environment() -> void:
+              world = Node3D.new()
+              world.name = "World"
+              add_child(world)
+
+              var sun = DirectionalLight3D.new()
+              sun.rotation_degrees = Vector3(-45, -30, 0)
+              sun.light_energy = 1.0
+              sun.shadow_enabled = true
+              world.add_child(sun)
+
+              var ambient = AmbientLight3D.new()
+              ambient.light_energy = 0.4
+              world.add_child(ambient)
+
+              var floor = MeshInstance3D.new()
+              var floor_mesh = BoxMesh.new()
+              floor_mesh.size = Vector3(100, 0.5, 100)
+              var floor_mat = StandardMaterial3D.new()
+              floor_mat.albedo_color = Color(0.3, 0.35, 0.3)
+              floor_mesh.material = floor_mat
+              floor.mesh = floor_mesh
+              floor.position = Vector3(0, -0.25, 0)
+              world.add_child(floor)
+
+              var floor_col = StaticBody3D.new()
+              var floor_shape = CollisionShape3D.new()
+              var floor_box = BoxShape3D.new()
+              floor_box.size = Vector3(100, 0.5, 100)
+              floor_shape.shape = floor_box
+              floor_col.add_child(floor_shape)
+              floor_col.position = Vector3(0, -0.25, 0)
+              world.add_child(floor_col)
+
+              for i in range(4):
+                  var wall = MeshInstance3D.new()
+                  var wall_mesh = BoxMesh.new()
+                  var wall_mat = StandardMaterial3D.new()
+                  wall_mat.albedo_color = Color(0.4, 0.35, 0.3)
+                  wall_mesh.material = wall_mat
+                  match i:
+                      0:
+                          wall_mesh.size = Vector3(100, 5, 1)
+                          wall.position = Vector3(0, 2.5, -50)
+                      1:
+                          wall_mesh.size = Vector3(100, 5, 1)
+                          wall.position = Vector3(0, 2.5, 50)
+                      2:
+                          wall_mesh.size = Vector3(1, 5, 100)
+                          wall.position = Vector3(-50, 2.5, 0)
+                      3:
+                          wall_mesh.size = Vector3(1, 5, 100)
+                          wall.position = Vector3(50, 2.5, 0)
+                  wall.mesh = wall_mesh
+                  world.add_child(wall)
+
+                  var wall_col = StaticBody3D.new()
+                  var wall_shape = CollisionShape3D.new()
+                  var wall_box = BoxShape3D.new()
+                  wall_box.size = wall_mesh.size
+                  wall_shape.shape = wall_box
+                  wall_col.add_child(wall_shape)
+                  wall_col.position = wall.position
+                  world.add_child(wall_col)
+
+              var crate_positions = [
+                  Vector3(10, 0.75, 10), Vector3(-15, 0.75, 5),
+                  Vector3(20, 0.75, -20), Vector3(-10, 0.75, -30),
+                  Vector3(30, 0.75, 15), Vector3(-25, 0.75, -10),
+                  Vector3(5, 0.75, 25), Vector3(-30, 0.75, 30),
+              ]
+              for pos in crate_positions:
+                  var crate = MeshInstance3D.new()
+                  var crate_mesh = BoxMesh.new()
+                  crate_mesh.size = Vector3(1.5, 1.5, 1.5)
+                  var crate_mat = StandardMaterial3D.new()
+                  crate_mat.albedo_color = Color(0.6, 0.45, 0.2)
+                  crate_mesh.material = crate_mat
+                  crate.mesh = crate_mesh
+                  crate.position = pos
+                  world.add_child(crate)
+
+                  var crate_col = StaticBody3D.new()
+                  var crate_shape = CollisionShape3D.new()
+                  var crate_box = BoxShape3D.new()
+                  crate_box.size = Vector3(1.5, 1.5, 1.5)
+                  crate_shape.shape = crate_box
+                  crate_col.add_child(crate_shape)
+                  crate_col.position = pos
+                  world.add_child(crate_col)
+
+          func _build_player() -> void:
+              player = CharacterBody3D.new()
+              player.name = "Player"
+              player.position = Vector3(0, 1.7, 0)
+
+              var col = CollisionShape3D.new()
+              var capsule = CapsuleShape3D.new()
+              capsule.radius = 0.4
+              capsule.height = 1.8
+              col.shape = capsule
+              player.add_child(col)
+
+              camera = Camera3D.new()
+              camera.name = "Camera"
+              camera.fov = 75.0
+              camera.near = 0.1
+              camera.far = 200.0
+              player.add_child(camera)
+
+              var gun = MeshInstance3D.new()
+              var gun_mesh = BoxMesh.new()
+              gun_mesh.size = Vector3(0.08, 0.08, 0.4)
+              var gun_mat = StandardMaterial3D.new()
+              gun_mat.albedo_color = Color(0.2, 0.2, 0.25)
+              gun_mesh.material = gun_mat
+              gun.mesh = gun_mesh
+              gun.position = Vector3(0.2, -0.15, -0.4)
+              camera.add_child(gun)
+
+              add_child(player)
+
+          func _build_hud() -> void:
+              hud = CanvasLayer.new()
+              hud.name = "HUD"
+              add_child(hud)
+
+              crosshair = Label.new()
+              crosshair.text = "+"
+              crosshair.add_theme_font_size_override("font_size", 24)
+              crosshair.add_theme_color_override("font_color", Color(1, 1, 1, 0.8))
+              crosshair.position = Vector2(640 - 8, 360 - 12)
+              crosshair.z_index = 10
+              hud.add_child(crosshair)
+
+              health_label = Label.new()
+              health_label.text = "HP: 100"
+              health_label.add_theme_font_size_override("font_size", 28)
+              health_label.add_theme_color_override("font_color", Color(0.3, 1.0, 0.3))
+              health_label.position = Vector2(20, 20)
+              hud.add_child(health_label)
+
+              score_label = Label.new()
+              score_label.text = "Score: 0"
+              score_label.add_theme_font_size_override("font_size", 28)
+              score_label.add_theme_color_override("font_color", Color(1.0, 0.9, 0.3))
+              score_label.position = Vector2(20, 55)
+              hud.add_child(score_label)
+
+              game_over_label = Label.new()
+              game_over_label.text = ""
+              game_over_label.add_theme_font_size_override("font_size", 48)
+              game_over_label.add_theme_color_override("font_color", Color(1, 0.2, 0.2))
+              game_over_label.position = Vector2(350, 300)
+              game_over_label.visible = false
+              hud.add_child(game_over_label)
+
+          func _spawn_enemies(count: int) -> void:
+              for i in range(count):
+                  _spawn_one_enemy()
+
+          func _spawn_one_enemy() -> void:
+              var enemy = CharacterBody3D.new()
+              enemy.name = "Enemy_" + str(enemies.size())
+
+              var body = MeshInstance3D.new()
+              var body_mesh = BoxMesh.new()
+              body_mesh.size = Vector3(0.8, 1.6, 0.8)
+              var body_mat = StandardMaterial3D.new()
+              body_mat.albedo_color = Color(0.8, 0.2, 0.2)
+              body_mesh.material = body_mat
+              body.mesh = body_mesh
+              body.position = Vector3(0, 0.8, 0)
+              enemy.add_child(body)
+
+              var head = MeshInstance3D.new()
+              var head_mesh = BoxMesh.new()
+              head_mesh.size = Vector3(0.5, 0.5, 0.5)
+              var head_mat = StandardMaterial3D.new()
+              head_mat.albedo_color = Color(0.9, 0.5, 0.3)
+              head_mesh.material = head_mat
+              head.mesh = head_mesh
+              head.position = Vector3(0, 1.85, 0)
+              enemy.add_child(head)
+
+              var col = CollisionShape3D.new()
+              var box = BoxShape3D.new()
+              box.size = Vector3(0.8, 1.6, 0.8)
+              col.shape = box
+              col.position = Vector3(0, 0.8, 0)
+              enemy.add_child(col)
+
+              var pos = Vector3(randf_range(-40, 40), 0.0, randf_range(-40, 40))
+              while pos.distance_to(player.position) < 15.0:
+                  pos = Vector3(randf_range(-40, 40), 0.0, randf_range(-40, 40))
+              enemy.position = pos
+
+              enemy.set_meta("health", 3)
+              add_child(enemy)
+              enemies.append(enemy)
+
+          func _process(delta: float) -> void:
+              if game_over:
+                  if Input.is_action_just_pressed("restart"):
+                      get_tree().reload_current_scene()
+                  return
+
+              if shoot_cooldown > 0:
+                  shoot_cooldown -= delta
+
+              if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+                  var mouse_motion = Input.get_mouse_motion()
+                  player.rotate_y(-mouse_motion.x * 0.002)
+                  camera.rotate_x(-mouse_motion.y * 0.002)
+                  camera.rotation.x = clampf(camera.rotation.x, -PI/2 + 0.1, PI/2 - 0.1)
+
+              var input_dir = Vector3.ZERO
+              if Input.is_action_pressed("move_forward"):
+                  input_dir.z -= 1
+              if Input.is_action_pressed("move_back"):
+                  input_dir.z += 1
+              if Input.is_action_pressed("move_left"):
+                  input_dir.x -= 1
+              if Input.is_action_pressed("move_right"):
+                  input_dir.x += 1
+
+              if input_dir.length() > 0:
+                  input_dir = input_dir.normalized()
+                  var world_dir = player.transform.basis * input_dir
+                  world_dir.y = 0
+                  player.velocity = world_dir * PLAYER_SPEED
+              else:
+                  player.velocity = Vector3.ZERO
+              player.velocity.y = -9.8 * delta * 60
+              player.move_and_slide()
+
+              player.position.x = clampf(player.position.x, -48, 48)
+              player.position.z = clampf(player.position.z, -48, 48)
+              if player.position.y < 1.7:
+                  player.position.y = 1.7
+                  player.velocity.y = 0
+
+              if Input.is_action_just_pressed("shoot") and shoot_cooldown <= 0:
+                  _shoot()
+
+              _update_enemies(delta)
+
+              enemy_spawn_timer += delta
+              if enemy_spawn_timer >= enemy_spawn_interval and enemies.size() < MAX_ENEMIES:
+                  _spawn_one_enemy()
+                  enemy_spawn_timer = 0.0
+
+          func _shoot() -> void:
+              shoot_cooldown = SHOOT_COOLDOWN_MAX
+
+              var space = get_world_3d().direct_space_state
+              var from = camera.global_position
+              var to = from + camera.global_transform.basis.z * -50
+              var query = PhysicsRayQueryParameters3D.create(from, to)
+              query.exclude = [player]
+              var result = space.intersect_ray(query)
+
+              if result:
+                  var collider = result.collider
+                  if collider is CharacterBody3D and collider in enemies:
+                      var hp = collider.get_meta("health") - 1
+                      if hp <= 0:
+                          _kill_enemy(collider)
+                      else:
+                          collider.set_meta("health", hp)
+
+              var flash = MeshInstance3D.new()
+              var flash_mesh = SphereMesh.new()
+              flash_mesh.radius = 0.05
+              flash_mesh.height = 0.1
+              var flash_mat = StandardMaterial3D.new()
+              flash_mat.albedo_color = Color(1, 0.8, 0.2)
+              flash_mat.emission = Color(1, 0.8, 0.2)
+              flash_mat.emission_energy_multiplier = 3.0
+              flash_mesh.material = flash_mat
+              flash.mesh = flash_mesh
+              flash.position = Vector3(0.2, -0.15, -0.6)
+              camera.add_child(flash)
+              get_tree().create_timer(0.05).timeout.connect(flash.queue_free.bind())
+
+          func _kill_enemy(enemy: Node3D) -> void:
+              enemies.erase(enemy)
+              enemy.queue_free()
+              score += 10
+              score_label.text = "Score: " + str(score)
+
+          func _update_enemies(delta: float) -> void:
+              for enemy in enemies:
+                  if not is_instance_valid(enemy):
+                      continue
+                  var dir = (player.position - enemy.position)
+                  dir.y = 0
+                  if dir.length() > 1.5:
+                      dir = dir.normalized()
+                      enemy.position += dir * ENEMY_SPEED * delta
+                      enemy.look_at(enemy.position + dir, Vector3.UP)
+
+                  if enemy.position.distance_to(player.position) < 1.2:
+                      player_health -= ENEMY_DAMAGE * delta
+                      health_label.text = "HP: " + str(int(player_health))
+                      health_label.add_theme_color_override("font_color", Color(1, 0.3, 0.3))
+                      if player_health <= 0:
+                          _game_over()
+                          return
+
+          func _game_over() -> void:
+              game_over = true
+              game_over_label.text = "GAME OVER - Score: " + str(score) + "\nPress R to Restart"
+              game_over_label.visible = true
+              Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+          func _input(event: InputEvent) -> void:
+              if game_over:
+                  if event is InputEventScreenTouch and event.pressed:
+                      get_tree().reload_current_scene()
+                  return
+
+              if OS.get_name() == "Android" or OS.get_name() == "iOS":
+                  if event is InputEventScreenTouch:
+                      if event.pressed:
+                          if event.position.x > DisplayServer.window_size.x / 2:
+                              if shoot_cooldown <= 0:
+                                  _shoot()
+                  elif event is InputEventScreenDrag:
+                      if event.position.x < DisplayServer.window_size.x / 2:
+                          var move_vec = Vector2(event.relative.x, event.relative.y) * 0.05
+                          var world_dir = player.transform.basis * Vector3(move_vec.x, 0, move_vec.y)
+                          player.velocity = world_dir.normalized() * PLAYER_SPEED
+                      else:
+                          player.rotate_y(-event.relative.x * 0.003)
+                          camera.rotate_x(-event.relative.y * 0.003)
+                          camera.rotation.x = clampf(camera.rotation.x, -PI/2 + 0.1, PI/2 - 0.1)
+          EOF
+
+      - name: Import Project
+        run: |
+          cd project
+          godot --headless --import 2>&1 || true
+
+      - name: Export Android APK
+        env:
+          GODOT_ANDROID_KEYSTORE_DEBUG_PATH: ${{ github.workspace }}/debug.keystore
+          GODOT_ANDROID_KEYSTORE_DEBUG_USER: androiddebugkey
+          GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD: android
+        run: |
+          cd project
+          mkdir -p ../output
+          godot --headless --export-release "Android" ../output/game.apk
+          ls -la ../output/game.apk
+
+      - name: Upload Android APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: mini-fps-android
+          path: output/game.apk   
