@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 env:
-  GODOT_VERSION: "4.7.2-stable"
+  GODOT_VERSION: "4.7.2"
 
 jobs:
   # ═══════════════════════════════════════════
@@ -21,8 +21,9 @@ jobs:
       - name: Setup Godot
         uses: chickensoft-games/setup-godot@v2
         with:
-          godot-version: ${{ env.GODOT_VERSION }}
+          version: ${{ env.GODOT_VERSION }}
           use-dotnet: false
+          include-templates: true
 
       - name: Create Project
         run: |
@@ -579,7 +580,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Setup JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -587,13 +588,14 @@ jobs:
       - name: Setup Godot
         uses: chickensoft-games/setup-godot@v2
         with:
-          godot-version: ${{ env.GODOT_VERSION }}
+          version: ${{ env.GODOT_VERSION }}
           use-dotnet: false
+          include-templates: true
 
       - name: Install Android SDK packages
         run: |
           echo "ANDROID_HOME=$ANDROID_HOME"
-          ls /usr/local/lib/android/sdk/ 2>/dev/null || ls $ANDROID_HOME/ 2>/dev/null
+          ls /usr/local/lib/android/sdk/ 2>/dev/null || true
           yes | /usr/local/lib/android/sdk/cmdline-tools/*/bin/sdkmanager --licenses 2>/dev/null || true
           /usr/local/lib/android/sdk/cmdline-tools/*/bin/sdkmanager "platform-tools" "build-tools;34.0.0" "platforms;android-34" 2>&1 || true
 
@@ -1155,11 +1157,6 @@ jobs:
         run: |
           cd project
           godot --headless --import 2>&1 || true
-
-      - name: Install Android Build Template
-        run: |
-          cd project
-          godot --headless --install-android-build-template 2>&1 || true
 
       - name: Export Android APK
         env:
