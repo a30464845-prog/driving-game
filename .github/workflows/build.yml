@@ -55,6 +55,21 @@ jobs:
           npx cap add android
           npx cap sync android
 
+      - name: Fix Kotlin duplicate classes
+        run: |
+          cd game/android/app
+          # build.gradle me resolutionStrategy add karo
+          cat >> build.gradle << 'EOF'
+
+          configurations.all {
+              resolutionStrategy {
+                  force 'org.jetbrains.kotlin:kotlin-stdlib:1.8.22'
+                  force 'org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22'
+                  force 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22'
+              }
+          }
+          EOF
+
       - name: Build APK
         working-directory: game/android
         run: ./gradlew assembleDebug --no-daemon
@@ -87,7 +102,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path app
           Copy-Item -Path "game\*" -Destination "app\" -Recurse -Force
 
-          # Game ka package.json overwrite karo (ESM conflict fix)
+          # package.json — no "type":"module", no "files" array (sab include hoga)
           @'
           {
             "name": "gta-driving",
@@ -96,13 +111,12 @@ jobs:
             "build": {
               "appId": "com.gta.driving",
               "productName": "GTA Driving",
-              "files": ["index.html", "*.js", "*.mjs", "*.css", "*.json", "*.png", "*.svg", "*.mp3", "*.ogg", "*.wasm", "assets/**/*", "models/**/*", "textures/**/*", "scripts/**/*", "audio/**/*", "data/**/*", "src/**/*", "sw.js"],
               "win": { "target": "portable" }
             }
           }
           '@ | Set-Content -Path "app\package.json" -Encoding UTF8
 
-          # main.js (CommonJS - kyunki package.json me "type":"module" nahi hai)
+          # main.js
           @'
           const { app, BrowserWindow } = require('electron');
           function createWindow() {
@@ -119,18 +133,20 @@ jobs:
           app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
           '@ | Set-Content -Path "app\main.js" -Encoding UTF8
 
-      - name: Install Electron
+      - name: Install and Build EXE
         working-directory: app
         shell: pwsh
-        run: npm install electron@28 electron-builder@24 --save-dev
+        run: |
+          npm install electron@28 electron-builder@24 --save-dev
+          npx electron-builder --win portable --publish never
 
-      - name: Build EXE
+      - name: List dist folder (debug)
         working-directory: app
         shell: pwsh
-        run: npx electron-builder --win portable --publish never
+        run: Get-ChildItem -Recurse dist/ | Select-Object FullName
 
       - name: Upload EXE
         uses: actions/upload-artifact@v4
         with:
           name: GTA-Driving-Windows-EXE
-          path: app/dist/*portable*.exe   
+          path: app/dist/   
