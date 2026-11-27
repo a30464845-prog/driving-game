@@ -1,152 +1,678 @@
-name: Build GTA Game (APK + EXE)
+# .github/workflows/build.yml
+name: Build FPS Game (Win32 + Android)
 
 on:
-  workflow_dispatch:
   push:
     branches: [main]
+  workflow_dispatch:
+
+env:
+  GODOT_VERSION: "4.7.2-stable"
 
 jobs:
-  # ==================== ANDROID APK ====================
-  build-android:
+  build:
     runs-on: ubuntu-latest
     steps:
-      - name: Clone game source
-        uses: actions/checkout@v4
-        with:
-          repository: Faizankhan17623/OpenCity
-          ref: main
-          path: game
+      - uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Setup Java 21
+      # ─── Setup JDK 17 (Android ke liye) ───
+      - name: Setup JDK
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: '17'
 
+      # ─── Setup Android SDK ───
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
-        with:
-          packages: 'platform-tools platforms;android-34 build-tools;34.0.0'
 
-      - name: Setup Capacitor
+      # ─── Download Godot + Export Templates ───
+      - name: Download Godot
         run: |
-          cd game
-          npm install @capacitor/core @capacitor/cli @capacitor/android
+          wget -q "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}/Godot_v${GODOT_VERSION}_linux.x86_64" -O godot
+          chmod +x godot
 
-          mkdir -p www
-          find . -maxdepth 1 -type f \( -name "*.html" -o -name "*.js" -o -name "*.mjs" -o -name "*.css" -o -name "*.json" -o -name "*.png" -o -name "*.svg" -o -name "*.mp3" -o -name "*.ogg" -o -name "*.wasm" \) -exec cp {} www/ \;
-          for dir in assets models textures scripts audio data src; do
-            [ -d "$dir" ] && cp -r "$dir" www/
-          done
-
-          cat > capacitor.config.json << 'EOF'
-          {
-            "appId": "com.gta.driving",
-            "appName": "GTA Driving",
-            "webDir": "www"
-          }
-          EOF
-
-          npx cap add android
-          npx cap sync android
-
-      - name: Fix Kotlin duplicate classes
+      - name: Install Export Templates
         run: |
-          cd game/android/app
-          # build.gradle me resolutionStrategy add karo
-          cat >> build.gradle << 'EOF'
+          wget -q "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}/Godot_v${GODOT_VERSION}_export_templates.tpz" -O templates.tpz
+          mkdir -p ~/.local/share/godot/export_templates/${GODOT_VERSION%.stable}
+          unzip -q templates.tpz -d ~/.local/share/godot/export_templates/${GODOT_VERSION%.stable}/
 
-          configurations.all {
-              resolutionStrategy {
-                  force 'org.jetbrains.kotlin:kotlin-stdlib:1.8.22'
-                  force 'org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22'
-                  force 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22'
-              }
+      # ─── Create Android Keystore ───
+      - name: Create Keystore
+        run: |
+          keytool -genkeypair -v \
+            -keystore debug.keystore \
+            -storepass android \
+            -alias androiddebugkey \
+            -keypass android \
+            -keyalg RSA -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=Debug, OU=Debug, O=Debug, L=Debug, ST=Debug, C=US"
+
+      # ─── Create Project Directory ───
+      - name: Create Project
+        run: |
+          mkdir -p project
+
+      # ─── Write project.godot ───
+      - name: Write project.godot
+        run: |
+          cat > project/project.godot << 'GODOT_EOF'
+          config_version=5
+
+          [application]
+          config/name="Mini FPS"
+          run/main_scene="res://main.tscn"
+          config/features=PackedStringArray("4.7", "Compatibility")
+          config/icon="res://icon.svg"
+
+          [display]
+          window/size/viewport_width=1280
+          window/size/viewport_height=720
+          window/stretch/mode="canvas_items"
+          window/stretch/aspect="keep"
+
+          [input]
+          move_forward={
+          "deadzone": 0.5,
+          "events": [Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":87,"key_label":0,"unicode":0,"location":0,"echo":false,"script":null)
+          ]
           }
-          EOF
+          move_back={
+          "deadzone": 0.5,
+          "events": [Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":83,"key_label":0,"unicode":0,"location":0,"echo":false,"script":null)
+          ]
+          }
+          move_left={
+          "deadzone": 0.5,
+          "events": [Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":65,"key_label":0,"unicode":0,"location":0,"echo":false,"script":null)
+          ]
+          }
+          move_right={
+          "deadzone": 0.5,
+          "events": [Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":68,"key_label":0,"unicode":0,"location":0,"echo":false,"script":null)
+          ]
+          }
+          shoot={
+          "deadzone": 0.5,
+          "events": [Object(InputEventMouseButton,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"button_mask":1,"position":Vector2(0,0),"global_position":Vector2(0,0),"factor":1.0,"button_index":1,"canceled":false,"pressed":true,"double_click":false,"script":null)
+          ]
+          }
+          restart={
+          "deadzone": 0.5,
+          "events": [Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":82,"key_label":0,"unicode":0,"location":0,"echo":false,"script":null)
+          ]
+          }
 
-      - name: Build APK
-        working-directory: game/android
-        run: ./gradlew assembleDebug --no-daemon
+          [rendering]
+          renderer/rendering_method="gl_compatibility"
+          renderer/rendering_method.mobile="gl_compatibility"
+          anti_aliasing/quality/msaa_3d=0
+          environment/defaults/default_clear_color=Color(0.1, 0.1, 0.15, 1)
+          GODOT_EOF
 
-      - name: Upload APK
+      # ─── Write export_presets.cfg ───
+      - name: Write export_presets.cfg
+        run: |
+          cat > project/export_presets.cfg << 'CFG_EOF'
+          [preset.0]
+          name="Windows"
+          platform="Windows Desktop"
+          runnable=true
+          export_filter="all_resources"
+          include_filter=""
+          exclude_filter=""
+          export_path="output/game.exe"
+          patch_path=""
+          patch_include_filter=""
+          patch_exclude_filter=""
+          patch_format=0
+          embed_pck=true
+          texture_compression/2d_lossy_quality=0.7
+          binary_format/architecture="x86"
+          binary_format/embed_pck=true
+          ssh_remote_deploy/enabled=false
+
+          [preset.0.options]
+          custom_template/debug=""
+          custom_template/release=""
+          debug/export_console_wrapper=1
+          binary_format/embed_pck=true
+          texture_format/s3tc_bptc=true
+          texture_format/etc2_astc=false
+
+          [preset.1]
+          name="Android"
+          platform="Android"
+          runnable=true
+          export_filter="all_resources"
+          include_filter=""
+          exclude_filter=""
+          export_path="output/game.apk"
+          patch_path=""
+          patch_include_filter=""
+          patch_exclude_filter=""
+          patch_format=0
+          embed_pck=true
+          texture_compression/2d_lossy_quality=0.7
+          binary_format/architecture="armeabi-v7a,arm64-v8a"
+          binary_format/embed_pck=true
+          ssh_remote_deploy/enabled=false
+
+          [preset.1.options]
+          custom_template/debug=""
+          custom_template/release=""
+          architecture/armeabi-v7a=true
+          architecture/arm64-v8a=true
+          architecture/x86=false
+          architecture/x86_64=false
+          keystore/debug="debug.keystore"
+          keystore/debug_user="androiddebugkey"
+          keystore/debug_password="android"
+          keystore/release=""
+          keystore/release_user=""
+          keystore/release_password=""
+          version/code=1
+          version/name="1.0"
+          package/unique_name="com.minifps.game"
+          screen/immersive_mode=true
+          screen/support_small=true
+          screen/support_normal=true
+          screen/support_large=true
+          screen/support_xlarge=true
+          graphics/opengl_debug=false
+          graphics/vulkan_layer_path=""
+          graphics/clamp_texture_size=false
+          graphics/force_32_bit_framebuffer=false
+          texture_format/s3tc_bptc=false
+          texture_format/etc2_astc=true
+          CFG_EOF
+
+      # ─── Write icon.svg (minimal) ───
+      - name: Write icon.svg
+        run: |
+          cat > project/icon.svg << 'SVG_EOF'
+          <svg xmlns="http://www.w3.org/2000/svg" width="128" height="128"><rect width="128" height="128" fill="#2a2a3a"/><circle cx="64" cy="64" r="40" fill="#e74c3c"/><rect x="58" y="30" width="12" height="50" fill="#2c3e50"/><rect x="44" y="50" width="40" height="12" fill="#2c3e50"/></svg>
+          SVG_EOF
+
+      # ─── Write main.tscn (minimal scene with root Node + script) ───
+      - name: Write main.tscn
+        run: |
+          cat > project/main.tscn << 'TSCN_EOF'
+          [gd_scene load_steps=2 format=3]
+
+          [ext_resource type="Script" path="res://main.gd" id="1"]
+
+          [node name="Main" type="Node3D"]
+          script = ExtResource("1")
+          TSCN_EOF
+
+      # ─── Write main.gd (THE ENTIRE GAME) ───
+      - name: Write main.gd
+        run: |
+          cat > project/main.gd << 'GD_EOF'
+          extends Node3D
+
+          # ─── GAME STATE ───
+          var player_health: int = 100
+          var score: int = 0
+          var game_over: bool = false
+          var player: CharacterBody3D
+          var camera: Camera3D
+          var enemies: Array[Node3D] = []
+          var world: Node3D
+          var hud: CanvasLayer
+          var health_label: Label
+          var score_label: Label
+          var game_over_label: Label
+          var crosshair: Label
+          var shoot_cooldown: float = 0.0
+          var SHOOT_COOLDOWN_MAX: float = 0.25
+          var ENEMY_SPEED: float = 3.0
+          var ENEMY_DAMAGE: float = 10
+          var PLAYER_SPEED: float = 5.0
+          var MAX_ENEMIES: int = 6
+          var enemy_spawn_timer: float = 0.0
+          var enemy_spawn_interval: float = 3.0
+          var hit_flash: float = 0.0
+
+          func _ready() -> void:
+              randomize()
+              _build_environment()
+              _build_player()
+              _build_hud()
+              _spawn_enemies(3)
+              Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+              get_viewport().get_camera_3d()
+
+          func _build_environment() -> void:
+              world = Node3D.new()
+              world.name = "World"
+              add_child(world)
+
+              # Directional Light (sun)
+              var sun = DirectionalLight3D.new()
+              sun.rotation_degrees = Vector3(-45, -30, 0)
+              sun.light_energy = 1.0
+              sun.shadow_enabled = true
+              sun.shadow_size = 1024
+              world.add_child(sun)
+
+              # Ambient light
+              var ambient = AmbientLight3D.new()
+              ambient.light_energy = 0.4
+              world.add_child(ambient)
+
+              # Floor
+              var floor = MeshInstance3D.new()
+              var floor_mesh = BoxMesh.new()
+              floor_mesh.size = Vector3(100, 0.5, 100)
+              floor.mesh = floor_mesh
+              floor.position = Vector3(0, -0.25, 0)
+              var floor_mat = StandardMaterial3D.new()
+              floor_mat.albedo_color = Color(0.3, 0.35, 0.3)
+              floor_mesh.material = floor_mat
+              world.add_child(floor)
+
+              # Floor collision
+              var floor_col = StaticBody3D.new()
+              var floor_shape = CollisionShape3D.new()
+              var floor_box = BoxShape3D.new()
+              floor_box.size = Vector3(100, 0.5, 100)
+              floor_shape.shape = floor_box
+              floor_col.add_child(floor_shape)
+              floor_col.position = Vector3(0, -0.25, 0)
+              world.add_child(floor_col)
+
+              # Walls (4 sides)
+              for i in range(4):
+                  var wall = MeshInstance3D.new()
+                  var wall_mesh = BoxMesh.new()
+                  var wall_mat = StandardMaterial3D.new()
+                  wall_mat.albedo_color = Color(0.4, 0.35, 0.3)
+                  wall_mesh.material = wall_mat
+                  match i:
+                      0:  # North
+                          wall_mesh.size = Vector3(100, 5, 1)
+                          wall.position = Vector3(0, 2.5, -50)
+                      1:  # South
+                          wall_mesh.size = Vector3(100, 5, 1)
+                          wall.position = Vector3(0, 2.5, 50)
+                      2:  # West
+                          wall_mesh.size = Vector3(1, 5, 100)
+                          wall.position = Vector3(-50, 2.5, 0)
+                      3:  # East
+                          wall_mesh.size = Vector3(1, 5, 100)
+                          wall.position = Vector3(50, 2.5, 0)
+                  wall.mesh = wall_mesh
+                  world.add_child(wall)
+
+                  var wall_col = StaticBody3D.new()
+                  var wall_shape = CollisionShape3D.new()
+                  var wall_box = BoxShape3D.new()
+                  wall_box.size = wall_mesh.size
+                  wall_shape.shape = wall_box
+                  wall_col.add_child(wall_shape)
+                  wall_col.position = wall.position
+                  world.add_child(wall_col)
+
+              # Crates / obstacles
+              var crate_positions = [
+                  Vector3(10, 0.75, 10), Vector3(-15, 0.75, 5),
+                  Vector3(20, 0.75, -20), Vector3(-10, 0.75, -30),
+                  Vector3(30, 0.75, 15), Vector3(-25, 0.75, -10),
+                  Vector3(5, 0.75, 25), Vector3(-30, 0.75, 30),
+              ]
+              for pos in crate_positions:
+                  var crate = MeshInstance3D.new()
+                  var crate_mesh = BoxMesh.new()
+                  crate_mesh.size = Vector3(1.5, 1.5, 1.5)
+                  var crate_mat = StandardMaterial3D.new()
+                  crate_mat.albedo_color = Color(0.6, 0.45, 0.2)
+                  crate_mesh.material = crate_mat
+                  crate.mesh = crate_mesh
+                  crate.position = pos
+                  world.add_child(crate)
+
+                  var crate_col = StaticBody3D.new()
+                  var crate_shape = CollisionShape3D.new()
+                  var crate_box = BoxShape3D.new()
+                  crate_box.size = Vector3(1.5, 1.5, 1.5)
+                  crate_shape.shape = crate_box
+                  crate_col.add_child(crate_shape)
+                  crate_col.position = pos
+                  world.add_child(crate_col)
+
+          func _build_player() -> void:
+              player = CharacterBody3D.new()
+              player.name = "Player"
+              player.position = Vector3(0, 1.7, 0)
+
+              # Collision shape
+              var col = CollisionShape3D.new()
+              var capsule = CapsuleShape3D.new()
+              capsule.radius = 0.4
+              capsule.height = 1.8
+              col.shape = capsule
+              player.add_child(col)
+
+              # Camera
+              camera = Camera3D.new()
+              camera.name = "Camera"
+              camera.fov = 75.0
+              camera.near = 0.1
+              camera.far = 200.0
+              player.add_child(camera)
+
+              # Gun (simple box in front of camera)
+              var gun = MeshInstance3D.new()
+              var gun_mesh = BoxMesh.new()
+              gun_mesh.size = Vector3(0.08, 0.08, 0.4)
+              var gun_mat = StandardMaterial3D.new()
+              gun_mat.albedo_color = Color(0.2, 0.2, 0.25)
+              gun_mesh.material = gun_mat
+              gun.mesh = gun_mesh
+              gun.position = Vector3(0.2, -0.15, -0.4)
+              camera.add_child(gun)
+
+              add_child(player)
+
+          func _build_hud() -> void:
+              hud = CanvasLayer.new()
+              hud.name = "HUD"
+              add_child(hud)
+
+              # Crosshair
+              crosshair = Label.new()
+              crosshair.text = "+"
+              crosshair.add_theme_font_size_override("font_size", 24)
+              crosshair.add_theme_color_override("font_color", Color(1, 1, 1, 0.8))
+              crosshair.position = Vector2(640 - 8, 360 - 12)
+              crosshair.z_index = 10
+              hud.add_child(crosshair)
+
+              # Health
+              health_label = Label.new()
+              health_label.text = "HP: 100"
+              health_label.add_theme_font_size_override("font_size", 28)
+              health_label.add_theme_color_override("font_color", Color(0.3, 1.0, 0.3))
+              health_label.position = Vector2(20, 20)
+              hud.add_child(health_label)
+
+              # Score
+              score_label = Label.new()
+              score_label.text = "Score: 0"
+              score_label.add_theme_font_size_override("font_size", 28)
+              score_label.add_theme_color_override("font_color", Color(1.0, 0.9, 0.3))
+              score_label.position = Vector2(20, 55)
+              hud.add_child(score_label)
+
+              # Game Over
+              game_over_label = Label.new()
+              game_over_label.text = ""
+              game_over_label.add_theme_font_size_override("font_size", 48)
+              game_over_label.add_theme_color_override("font_color", Color(1, 0.2, 0.2))
+              game_over_label.position = Vector2(350, 300)
+              game_over_label.visible = false
+              hud.add_child(game_over_label)
+
+          func _spawn_enemies(count: int) -> void:
+              for i in range(count):
+                  _spawn_one_enemy()
+
+          func _spawn_one_enemy() -> void:
+              var enemy = CharacterBody3D.new()
+              enemy.name = "Enemy_" + str(enemies.size())
+
+              # Body
+              var body = MeshInstance3D.new()
+              var body_mesh = BoxMesh.new()
+              body_mesh.size = Vector3(0.8, 1.6, 0.8)
+              var body_mat = StandardMaterial3D.new()
+              body_mat.albedo_color = Color(0.8, 0.2, 0.2)
+              body_mesh.material = body_mat
+              body.mesh = body_mesh
+              body.position = Vector3(0, 0.8, 0)
+              enemy.add_child(body)
+
+              # Head
+              var head = MeshInstance3D.new()
+              var head_mesh = BoxMesh.new()
+              head_mesh.size = Vector3(0.5, 0.5, 0.5)
+              var head_mat = StandardMaterial3D.new()
+              head_mat.albedo_color = Color(0.9, 0.5, 0.3)
+              head_mesh.material = head_mat
+              head.mesh = head_mesh
+              head.position = Vector3(0, 1.85, 0)
+              enemy.add_child(head)
+
+              # Collision
+              var col = CollisionShape3D.new()
+              var box = BoxShape3D.new()
+              box.size = Vector3(0.8, 1.6, 0.8)
+              col.shape = box
+              col.position = Vector3(0, 0.8, 0)
+              enemy.add_child(col)
+
+              # Position: random spot away from player
+              var pos = Vector3(
+                  randf_range(-40, 40), 0.0, randf_range(-40, 40)
+              )
+              # Keep at least 15 units from player
+              while pos.distance_to(player.position) < 15.0:
+                  pos = Vector3(randf_range(-40, 40), 0.0, randf_range(-40, 40))
+              enemy.position = pos
+
+              enemy.set_meta("health", 3)
+              add_child(enemy)
+              enemies.append(enemy)
+
+          func _process(delta: float) -> void:
+              if game_over:
+                  if Input.is_action_just_pressed("restart"):
+                      get_tree().reload_current_scene()
+                  return
+
+              # Shoot cooldown
+              if shoot_cooldown > 0:
+                  shoot_cooldown -= delta
+
+              # Hit flash
+              if hit_flash > 0:
+                  hit_flash -= delta
+                  if hit_flash <= 0:
+                      camera.current = true
+
+              # Mouse look
+              var mouse = Input.get_vector("move_left", "move_right", 0, 0, false)  # placeholder
+              var mouse_motion = Input.get_mouse_motion()
+              if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+                  player.rotate_y(-mouse_motion.x * 0.002)
+                  camera.rotate_x(-mouse_motion.y * 0.002)
+                  camera.rotation.x = clampf(camera.rotation.x, -PI/2 + 0.1, PI/2 - 0.1)
+
+              # WASD movement
+              var input_dir = Vector3.ZERO
+              if Input.is_action_pressed("move_forward"):
+                  input_dir.z -= 1
+              if Input.is_action_pressed("move_back"):
+                  input_dir.z += 1
+              if Input.is_action_pressed("move_left"):
+                  input_dir.x -= 1
+              if Input.is_action_pressed("move_right"):
+                  input_dir.x += 1
+
+              if input_dir.length() > 0:
+                  input_dir = input_dir.normalized()
+                  var world_dir = player.transform.basis * input_dir
+                  world_dir.y = 0
+                  player.velocity = world_dir * PLAYER_SPEED
+              else:
+                  player.velocity = Vector3.ZERO
+              player.velocity.y = -9.8 * delta * 60  # gravity
+              player.move_and_slide()
+
+              # Clamp to arena
+              player.position.x = clampf(player.position.x, -48, 48)
+              player.position.z = clampf(player.position.z, -48, 48)
+              if player.position.y < 1.7:
+                  player.position.y = 1.7
+                  player.velocity.y = 0
+
+              # Shoot
+              if Input.is_action_just_pressed("shoot") and shoot_cooldown <= 0:
+                  _shoot()
+
+              # Enemy AI
+              _update_enemies(delta)
+
+              # Spawn timer
+              enemy_spawn_timer += delta
+              if enemy_spawn_timer >= enemy_spawn_interval and enemies.size() < MAX_ENEMIES:
+                  _spawn_one_enemy()
+                  enemy_spawn_timer = 0.0
+
+          func _shoot() -> void:
+              shoot_cooldown = SHOOT_COOLDOWN_MAX
+
+              # Raycast from camera
+              var space = get_world_3d().direct_space_state
+              var from = camera.global_position
+              var to = from + camera.global_transform.basis.z * -50
+              var query = PhysicsRayQueryParameters3D.create(from, to)
+              query.exclude = [player]
+              var result = space.intersect_ray(query)
+
+              if result:
+                  var collider = result.collider
+                  if collider is CharacterBody3D and collider in enemies:
+                      var hp = collider.get_meta("health") - 1
+                      if hp <= 0:
+                          _kill_enemy(collider)
+                      else:
+                          collider.set_meta("health", hp)
+                          # Flash enemy red
+                          for child in collider.get_children():
+                              if child is MeshInstance3D:
+                                  var mat = child.mesh.material.duplicate()
+                                  mat.albedo_color = Color(1, 0, 0)
+                                  child.mesh.material = mat
+
+              # Muzzle flash (simple)
+              var flash = MeshInstance3D.new()
+              var flash_mesh = SphereMesh.new()
+              flash_mesh.radius = 0.05
+              flash_mesh.height = 0.1
+              var flash_mat = StandardMaterial3D.new()
+              flash_mat.albedo_color = Color(1, 0.8, 0.2)
+              flash_mat.emission = Color(1, 0.8, 0.2)
+              flash_mat.emission_energy_multiplier = 3.0
+              flash_mesh.material = flash_mat
+              flash.mesh = flash_mesh
+              flash.position = Vector3(0.2, -0.15, -0.6)
+              camera.add_child(flash)
+              get_tree().create_timer(0.05).timeout.connect(flash.queue_free.bind())
+
+          func _kill_enemy(enemy: Node3D) -> void:
+              enemies.erase(enemy)
+              enemy.queue_free()
+              score += 10
+              score_label.text = "Score: " + str(score)
+
+          func _update_enemies(delta: float) -> void:
+              for enemy in enemies:
+                  if not is_instance_valid(enemy):
+                      continue
+                  # Move toward player
+                  var dir = (player.position - enemy.position)
+                  dir.y = 0
+                  if dir.length() > 1.5:
+                      dir = dir.normalized()
+                      enemy.position += dir * ENEMY_SPEED * delta
+                      enemy.look_at(enemy.position + dir, Vector3.UP)
+
+                  # Check collision with player
+                  if enemy.position.distance_to(player.position) < 1.2:
+                      player_health -= ENEMY_DAMAGE * delta
+                      hit_flash = 0.1
+                      health_label.text = "HP: " + str(int(player_health))
+                      health_label.add_theme_color_override("font_color", Color(1, 0.3, 0.3))
+                      if player_health <= 0:
+                          _game_over()
+                          return
+
+          func _game_over() -> void:
+              game_over = true
+              game_over_label.text = "GAME OVER - Score: " + str(score) + "\nPress R to Restart"
+              game_over_label.visible = true
+              Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+          # ─── TOUCH CONTROLS FOR MOBILE ───
+          func _input(event: InputEvent) -> void:
+              if game_over:
+                  if event is InputEventScreenTouch and event.pressed:
+                      get_tree().reload_current_scene()
+                  return
+
+              if OS.get_name() == "Android" or OS.get_name() == "iOS":
+                  if event is InputEventScreenTouch:
+                      if event.pressed:
+                          if event.position.x < DisplayServer.window_size.x / 2:
+                              # Left side: virtual joystick area (simplified)
+                              pass
+                          else:
+                              # Right side: shoot
+                              if shoot_cooldown <= 0:
+                                  _shoot()
+                  elif event is InputEventScreenDrag:
+                      if event.position.x < DisplayServer.window_size.x / 2:
+                          # Move
+                          var move_vec = Vector2(event.relative.x, event.relative.y) * 0.05
+                          var world_dir = player.transform.basis * Vector3(move_vec.x, 0, move_vec.y)
+                          player.velocity = world_dir.normalized() * PLAYER_SPEED
+                      else:
+                          # Look
+                          player.rotate_y(-event.relative.x * 0.003)
+                          camera.rotate_x(-event.relative.y * 0.003)
+                          camera.rotation.x = clampf(camera.rotation.x, -PI/2 + 0.1, PI/2 - 0.1)
+          GD_EOF
+
+      # ─── First import pass (generates .godot/ cache) ───
+      - name: Import Project
+        run: |
+          cd project
+          ../godot --headless --import 2>&1 || true
+
+      # ─── Export Windows 32-bit ───
+      - name: Export Windows 32-bit
+        run: |
+          cd project
+          ../godot --headless --export-release "Windows" ../output/game.exe
+          ls -la ../output/game.exe
+
+      # ─── Export Android ───
+      - name: Export Android
+        env:
+          GODOT_ANDROID_KEYSTORE_DEBUG_PATH: ${{ github.workspace }}/debug.keystore
+          GODOT_ANDROID_KEYSTORE_DEBUG_USER: androiddebugkey
+          GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD: android
+          ANDROID_HOME: ${{ github.workspace }}/android-sdk
+          JAVA_HOME: ${{ env.JAVA_HOME }}
+        run: |
+          cd project
+          ../godot --headless --export-release "Android" ../output/game.apk
+          ls -la ../output/game.apk
+
+      # ─── Upload Artifacts ───
+      - name: Upload Windows EXE
         uses: actions/upload-artifact@v4
         with:
-          name: GTA-Driving-Android-APK
-          path: game/android/app/build/outputs/apk/debug/app-debug.apk
+          name: mini-fps-windows-32bit
+          path: output/game.exe
 
-  # ==================== WINDOWS EXE ====================
-  build-pc:
-    runs-on: windows-latest
-    steps:
-      - name: Clone game source
-        uses: actions/checkout@v4
-        with:
-          repository: Faizankhan17623/OpenCity
-          ref: main
-          path: game
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Create Electron app
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path app
-          Copy-Item -Path "game\*" -Destination "app\" -Recurse -Force
-
-          # package.json — no "type":"module", no "files" array (sab include hoga)
-          @'
-          {
-            "name": "gta-driving",
-            "version": "1.0.0",
-            "main": "main.js",
-            "build": {
-              "appId": "com.gta.driving",
-              "productName": "GTA Driving",
-              "win": { "target": "portable" }
-            }
-          }
-          '@ | Set-Content -Path "app\package.json" -Encoding UTF8
-
-          # main.js
-          @'
-          const { app, BrowserWindow } = require('electron');
-          function createWindow() {
-            const win = new BrowserWindow({
-              width: 1280,
-              height: 720,
-              fullscreen: true,
-              autoHideMenuBar: true,
-              webPreferences: { nodeIntegration: false, contextIsolation: true }
-            });
-            win.loadFile('index.html');
-          }
-          app.whenReady().then(createWindow);
-          app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
-          '@ | Set-Content -Path "app\main.js" -Encoding UTF8
-
-      - name: Install and Build EXE
-        working-directory: app
-        shell: pwsh
-        run: |
-          npm install electron@28 electron-builder@24 --save-dev
-          npx electron-builder --win portable --publish never
-
-      - name: List dist folder (debug)
-        working-directory: app
-        shell: pwsh
-        run: Get-ChildItem -Recurse dist/ | Select-Object FullName
-
-      - name: Upload EXE
+      - name: Upload Android APK
         uses: actions/upload-artifact@v4
         with:
-          name: GTA-Driving-Windows-EXE
-          path: app/dist/   
+          name: mini-fps-android
+          path: output/game.apk   
