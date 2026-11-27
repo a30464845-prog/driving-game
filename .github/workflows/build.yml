@@ -22,11 +22,11 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Setup Java
+      - name: Setup Java 21
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
@@ -38,7 +38,6 @@ jobs:
           cd game
           npm install @capacitor/core @capacitor/cli @capacitor/android
 
-          # www folder banao — Capacitor webDir subdirectory hona chahiye
           mkdir -p www
           find . -maxdepth 1 -type f \( -name "*.html" -o -name "*.js" -o -name "*.mjs" -o -name "*.css" -o -name "*.json" -o -name "*.png" -o -name "*.svg" -o -name "*.mp3" -o -name "*.ogg" -o -name "*.wasm" \) -exec cp {} www/ \;
           for dir in assets models textures scripts audio data src; do
@@ -58,7 +57,7 @@ jobs:
 
       - name: Build APK
         working-directory: game/android
-        run: ./gradlew assembleDebug
+        run: ./gradlew assembleDebug --no-daemon
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
@@ -82,11 +81,13 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Create Electron wrapper
+      - name: Create Electron app
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path app
           Copy-Item -Path "game\*" -Destination "app\" -Recurse -Force
+
+          # Game ka package.json overwrite karo (ESM conflict fix)
           @'
           {
             "name": "gta-driving",
@@ -95,20 +96,37 @@ jobs:
             "build": {
               "appId": "com.gta.driving",
               "productName": "GTA Driving",
+              "files": ["index.html", "*.js", "*.mjs", "*.css", "*.json", "*.png", "*.svg", "*.mp3", "*.ogg", "*.wasm", "assets/**/*", "models/**/*", "textures/**/*", "scripts/**/*", "audio/**/*", "data/**/*", "src/**/*", "sw.js"],
               "win": { "target": "portable" }
             }
           }
-          '@ | Set-Content -Path "app\package.json"
+          '@ | Set-Content -Path "app\package.json" -Encoding UTF8
+
+          # main.js (CommonJS - kyunki package.json me "type":"module" nahi hai)
           @'
-          const {app,BrowserWindow}=require('electron');
-          function c(){let w=new BrowserWindow({width:1280,height:720,fullscreen:true,webPreferences:{nodeIntegration:false}});w.loadFile('index.html');w.setMenuBarVisibility(false)}
-          app.whenReady().then(c)
-          '@ | Set-Content -Path "app\main.js"
-          Set-Location app
-          npm install electron electron-builder --save-dev
+          const { app, BrowserWindow } = require('electron');
+          function createWindow() {
+            const win = new BrowserWindow({
+              width: 1280,
+              height: 720,
+              fullscreen: true,
+              autoHideMenuBar: true,
+              webPreferences: { nodeIntegration: false, contextIsolation: true }
+            });
+            win.loadFile('index.html');
+          }
+          app.whenReady().then(createWindow);
+          app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+          '@ | Set-Content -Path "app\main.js" -Encoding UTF8
+
+      - name: Install Electron
+        working-directory: app
+        shell: pwsh
+        run: npm install electron@28 electron-builder@24 --save-dev
 
       - name: Build EXE
         working-directory: app
+        shell: pwsh
         run: npx electron-builder --win portable --publish never
 
       - name: Upload EXE
